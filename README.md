@@ -1,5 +1,15 @@
 # Cluster Simulator
 
+## 상태와 다음 할 일
+
+- 질문: 데이터를 N개로 나눠 병렬로 처리하고 합칠 때, 스레드 수 · 파티션 수 · 저장소(파일, DB)에 따라 전체 시간과 합치는 비용이 어떻게 달라지는가.
+- 상태: **예정**. 설계 문서만 있고 코드 · 빌드 파일 · 실행 결과 기록은 아직 없다. 이 README의 API · 실행 방법 · 구조는 설계안이다. 설계는 [ADR-000](docs/adr/ADR-000-fanout-fanin-design.md)에 정리했고 원문은 [docs/archive/](docs/archive/)에 있다.
+- 수치: 이 저장소의 수치(응답 예시의 `totalTimeMs`, `speedupRatio` 등)는 모두 예상(실측 아님)이다.
+- 다음 할 일:
+  1. DB Worker의 집계 위치(SQL 집계, 애플리케이션 집계)를 정한다([ADR-000 §4](docs/adr/ADR-000-fanout-fanin-design.md#4-선택지)).
+  2. 파일 방식부터 만들고, 병렬 결과와 단일 스레드 결과의 단어 빈도가 같은지 먼저 확인한다.
+  3. 측정 조건과 원본을 저장소에 남긴 뒤 결과를 이 절에 적는다.
+
 한 대의 PC에서 클러스터링의 핵심 원리(Fan-out/Fan-in)를 직접 실험하는 학습 프로젝트
 
 ## 프로젝트 소개
@@ -33,13 +43,14 @@
 
 ## 프로젝트 구조
 
+> 설계안이다. 지금 저장소에는 `docs/`와 이 README만 있다. `src/` · `data/` · `build.gradle`은 아직 없다([ADR-000 §6](docs/adr/ADR-000-fanout-fanin-design.md#6-아직-없는-것)).
+
 ```
 cluster-simulator/
 ├── docs/                              # 문서
 │   ├── 01_clustering_fundamentals.md  # 클러스터링 기본 개념
-│   ├── 02_project_design.md           # 프로젝트 설계 문서
-│   ├── 03_phase1_file_based.md        # Phase 1 상세
-│   └── 04_phase2_db_based.md          # Phase 2 상세
+│   ├── adr/ADR-000-fanout-fanin-design.md  # 설계 · 범위 정리
+│   └── archive/                       # 설계 원문(02 설계, 03 Phase 1, 04 Phase 2)
 │
 ├── src/main/java/com/example/clustersimulator/
 │   ├── config/                        # 설정
@@ -101,25 +112,29 @@ source.txt → [table_0, table_1, ...] → 병렬 쿼리 → 결과 통합
 | POST | `/api/v1/db/analyze-single` | 단일 스레드 분석 |
 | GET | `/api/v1/db/compare` | 성능 비교 |
 
-## 핵심 학습 포인트
+## 핵심 학습 포인트 (예상 · 실측 아님)
+
+> 코드가 아직 없어서, 아래는 설계 의도와 만든 뒤 확인할 예상이다.
 
 ### 1. N+1 구조의 필수성
 
-병렬 처리에서는 N개의 Worker + 1개의 Coordinator/Aggregator가 반드시 필요하다. 호출자가 통합 역할을 겸해도 그 비용은 어딘가에서 반드시 발생한다.
+설계 의도: 병렬 처리에는 N개의 Worker와 1개의 Coordinator/Aggregator가 필요하다고 본다. 호출자가 통합 역할을 겸해도 그 비용은 어딘가에서 생길 것으로 예상한다.
 
 ### 2. 저장소 독립적인 병렬 패턴
 
-Phase 1(파일)과 Phase 2(DB)에서 `WordCountAggregator`가 동일하게 재사용된다. Fan-out/Fan-in 구조는 저장소에 독립적이다.
+설계 의도: Phase 1(파일)과 Phase 2(DB)에서 `WordCountAggregator`를 그대로 재사용한다. Fan-out/Fan-in 구조가 저장소와 상관없이 같은지는 만든 뒤 확인한다.
 
 ### 3. 통합 비용은 공짜가 아니다
 
-스레드 수를 늘릴수록 처리는 빨라지지만 통합(Aggregation) 비용도 증가한다. Amdahl의 법칙에 따라 순차 처리 부분이 전체 성능의 한계를 결정한다.
+예상: 스레드 수를 늘리면 처리는 빨라지겠지만 통합(Aggregation) 비용도 늘어날 것이다. Amdahl의 법칙대로라면 순차 처리 부분이 전체 성능의 한계를 정한다. 측정으로 확인할 항목이다.
 
 ### 4. 병렬이 항상 빠른 것은 아니다
 
-소규모 데이터에서는 스레드 생성 비용이 처리 비용을 초과할 수 있다. CPU 코어 수를 넘는 스레드는 성능 향상에 기여하지 못한다.
+예상: 데이터가 작으면 스레드 생성 비용이 처리 비용보다 클 수 있다. CPU 코어 수를 넘는 스레드는 성능 향상이 둔화될 것으로 본다. 측정으로 확인할 항목이다.
 
 ## 실행 방법
+
+> 아직 없음. 빌드 파일과 코드가 없어서 아래 명령은 지금 동작하지 않는다. 설계안으로 남겨 둔다.
 
 ### 사전 요구사항
 
@@ -193,9 +208,10 @@ done
 | 문서 | 내용 |
 |------|------|
 | [클러스터링 기본 개념](docs/01_clustering_fundamentals.md) | 컴퓨터 동작 방식, 클러스터링 원리, 장치별 클러스터링 방식 |
-| [프로젝트 설계](docs/02_project_design.md) | 전체 아키텍처, 패키지 구조, 컴포넌트 설계, API 설계, 성능 측정 전략 |
-| [Phase 1 상세](docs/03_phase1_file_based.md) | 파일 기반 병렬 처리 아키텍처, 컴포넌트 상세, API 상세 |
-| [Phase 2 상세](docs/04_phase2_db_based.md) | DB 기반 병렬 처리 아키텍처, 샤딩 설계, Phase 1과의 비교 |
+| [ADR-000 설계 · 범위](docs/adr/ADR-000-fanout-fanin-design.md) | 설계 요약, 범위, 정하지 않은 선택지, 아직 없는 것, 원문 대응표 |
+| [프로젝트 설계 (원문)](docs/archive/02_project_design.md) | 전체 아키텍처, 패키지 구조, 컴포넌트 설계, API 설계, 성능 측정 전략 |
+| [Phase 1 상세 (원문)](docs/archive/03_phase1_file_based.md) | 파일 기반 병렬 처리 아키텍처, 컴포넌트 상세, API 상세 |
+| [Phase 2 상세 (원문)](docs/archive/04_phase2_db_based.md) | DB 기반 병렬 처리 아키텍처, 샤딩 설계, Phase 1과의 비교 |
 
 ## 라이선스
 
